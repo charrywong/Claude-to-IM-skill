@@ -27,6 +27,15 @@ const MIME_EXT: Record<string, string> = {
   'image/webp': '.webp',
 };
 
+const CTI_SEND_DIRECTIVE_PROMPT = [
+  'Internal bridge protocol for attachments:',
+  '- Only when the user clearly asks you to send, attach, upload, or give them a generated local file/image back in chat, emit a self-closing tag in your final answer: <cti-send-file path="/absolute/path/to/file.ext" />',
+  '- Use an absolute local filesystem path that already exists.',
+  '- You may include normal user-facing text before or after the tag.',
+  '- If the user only wants the path, explanation, analysis, or file contents, do not emit the tag.',
+  '- Never emit the tag speculatively. Only use it for clear send-file intent.',
+].join('\n');
+
 // All SDK types kept as `any` because @openai/codex-sdk is optional.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type CodexModule = any;
@@ -132,31 +141,65 @@ export class CodexProvider implements LLMProvider {
               ...(passModel && params.model ? { model: params.model } : {}),
               ...(params.workingDirectory ? { workingDirectory: params.workingDirectory } : {}),
               ...(shouldSkipGitRepoCheck() ? { skipGitRepoCheck: true } : {}),
+              sandboxMode: 'danger-full-access',
+              networkAccessEnabled: true,
               approvalPolicy,
             };
 
-            // Build input: Codex SDK UserInput supports { type: "text" } and
-            // { type: "local_image", path: string }. We write base64 data to
-            // temp files so the SDK can read them as local images.
+            // Build input: Codex SDK only supports text and local_image.
+            // For non-image files, persist them locally and inject their paths
+            // into the text prompt so Codex can inspect them from disk.
             const imageFiles = params.files?.filter(
               f => f.type.startsWith('image/')
             ) ?? [];
+            const otherFiles = params.files?.filter(
+              f => !f.type.startsWith('image/')
+            ) ?? [];
+
+            const ensureLocalPath = (file: { name: string; type: string; data: string; filePath?: string }): string => {
+              if (file.filePath && fs.existsSync(file.filePath)) {
+                return file.filePath;
+              }
+              const ext = path.extname(file.name) || '';
+              const tmpPath = path.join(
+                os.tmpdir(),
+                `cti-file-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`,
+              );
+              fs.writeFileSync(tmpPath, Buffer.from(file.data, 'base64'));
+              tempFiles.push(tmpPath);
+              return tmpPath;
+            };
+
+            const fileContextLines = otherFiles.map((file, idx) => {
+              const localPath = ensureLocalPath(file);
+              return `- attachment ${idx + 1}: ${file.name} (${file.type}, ${file.size} bytes) at ${localPath}`;
+            });
+
+            const promptCore = fileContextLines.length > 0
+              ? `${params.prompt}\n\nAttached local files:\n${fileContextLines.join('\n')}\n\nYou can read these files directly from their local paths above.`
+              : params.prompt;
+            const promptWithFileContext = `${promptCore}\n\n${CTI_SEND_DIRECTIVE_PROMPT}`;
 
             let input: string | Array<Record<string, string>>;
             if (imageFiles.length > 0) {
               const parts: Array<Record<string, string>> = [
-                { type: 'text', text: params.prompt },
+                { type: 'text', text: promptWithFileContext },
               ];
               for (const file of imageFiles) {
-                const ext = MIME_EXT[file.type] || '.png';
-                const tmpPath = path.join(os.tmpdir(), `cti-img-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
-                fs.writeFileSync(tmpPath, Buffer.from(file.data, 'base64'));
-                tempFiles.push(tmpPath);
-                parts.push({ type: 'local_image', path: tmpPath });
+                const localPath = file.filePath && fs.existsSync(file.filePath)
+                  ? file.filePath
+                  : (() => {
+                      const ext = MIME_EXT[file.type] || '.png';
+                      const tmpPath = path.join(os.tmpdir(), `cti-img-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+                      fs.writeFileSync(tmpPath, Buffer.from(file.data, 'base64'));
+                      tempFiles.push(tmpPath);
+                      return tmpPath;
+                    })();
+                parts.push({ type: 'local_image', path: localPath });
               }
               input = parts;
             } else {
-              input = params.prompt;
+              input = promptWithFileContext;
             }
 
             let retryFresh = false;
