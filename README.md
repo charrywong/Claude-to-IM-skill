@@ -40,6 +40,37 @@ Claude Code / Codex → reads/writes your codebase
 
 Choose the section that matches the AI agent product you actually use.
 
+> Important for source installs and AI agents
+>
+> `Claude-to-IM-skill` depends on the sibling repository `Claude-to-IM` via `file:../Claude-to-IM`.
+> If you install from GitHub source, do not clone only this repository.
+> Clone both repositories side by side first, build `Claude-to-IM`, then install/build `Claude-to-IM-skill`.
+>
+> Canonical layout:
+>
+> ```text
+> ~/code/
+>   Claude-to-IM/
+>   Claude-to-IM-skill/
+> ```
+>
+> Canonical order:
+>
+> ```bash
+> mkdir -p ~/code
+> cd ~/code
+> git clone https://github.com/op7418/Claude-to-IM.git
+> git clone https://github.com/op7418/Claude-to-IM-skill.git
+>
+> cd ~/code/Claude-to-IM
+> npm install
+> npm run build
+>
+> cd ~/code/Claude-to-IM-skill
+> npm install
+> npm run build
+> ```
+
 ### Claude Code
 
 #### Recommended: `npx skills`
@@ -78,20 +109,49 @@ ln -s ~/code/Claude-to-IM-skill ~/.claude/skills/claude-to-im
 
 ### Codex
 
-#### Recommended: use the Codex install script
+#### Recommended: clone both repos, build core first, then link the skill
 
 ```bash
-git clone https://github.com/op7418/Claude-to-IM-skill.git ~/code/Claude-to-IM-skill
-bash ~/code/Claude-to-IM-skill/scripts/install-codex.sh
+mkdir -p ~/code
+cd ~/code
+git clone https://github.com/op7418/Claude-to-IM.git
+git clone https://github.com/op7418/Claude-to-IM-skill.git
+
+cd ~/code/Claude-to-IM
+npm install
+npm run build
+
+cd ~/code/Claude-to-IM-skill
+npm install
+npm run build
+bash scripts/install-codex.sh --link
 ```
 
-For local development with a live checkout:
+This is the safest README flow for both humans and AI agents:
+
+- the core package exists at `../Claude-to-IM`
+- the core package is already built before the skill installs
+- Codex sees a live linked checkout under `~/.codex/skills/claude-to-im`
+
+#### Alternative: use the Codex install script in copy mode
+
+If you want a copied install instead of a live symlink, still clone and build both repos first:
 
 ```bash
-bash ~/code/Claude-to-IM-skill/scripts/install-codex.sh --link
-```
+mkdir -p ~/code
+cd ~/code
+git clone https://github.com/op7418/Claude-to-IM.git
+git clone https://github.com/op7418/Claude-to-IM-skill.git
 
-The install script places the skill under `~/.codex/skills/claude-to-im`, installs dependencies, and builds the daemon.
+cd ~/code/Claude-to-IM
+npm install
+npm run build
+
+cd ~/code/Claude-to-IM-skill
+npm install
+npm run build
+bash scripts/install-codex.sh
+```
 
 After installation, tell Codex:
 
@@ -108,11 +168,20 @@ If you want WeChat specifically, you can also say:
 #### Alternative: clone directly into Codex skills
 
 ```bash
+mkdir -p ~/.codex/skills
+git clone https://github.com/op7418/Claude-to-IM.git ~/.codex/skills/Claude-to-IM
 git clone https://github.com/op7418/Claude-to-IM-skill.git ~/.codex/skills/claude-to-im
+
+cd ~/.codex/skills/Claude-to-IM
+npm install
+npm run build
+
 cd ~/.codex/skills/claude-to-im
 npm install
 npm run build
 ```
+
+This direct-clone flow only works if both directories exist side by side under `~/.codex/skills`.
 
 ### Verify installation
 
@@ -153,6 +222,16 @@ Then tell Claude Code:
 If you installed with the Codex install script in copy mode:
 
 ```bash
+cd ~/code/Claude-to-IM
+git pull
+npm install
+npm run build
+
+cd ~/code/Claude-to-IM-skill
+git pull
+npm install
+npm run build
+
 rm -rf ~/.codex/skills/claude-to-im
 bash ~/code/Claude-to-IM-skill/scripts/install-codex.sh
 ```
@@ -160,6 +239,11 @@ bash ~/code/Claude-to-IM-skill/scripts/install-codex.sh
 If you installed with `--link` or cloned directly into the Codex skills directory:
 
 ```bash
+cd ~/.codex/skills/Claude-to-IM 2>/dev/null || cd ~/code/Claude-to-IM
+git pull
+npm install
+npm run build
+
 cd ~/.codex/skills/claude-to-im
 git pull
 npm install

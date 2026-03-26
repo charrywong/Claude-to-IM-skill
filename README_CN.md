@@ -40,6 +40,37 @@ Claude Code / Codex → 读写你的代码库
 
 请先按你实际使用的 AI Agent 产品选择对应安装方式。
 
+> 对源码安装和 AI Agent 很重要
+>
+> `Claude-to-IM-skill` 通过 `file:../Claude-to-IM` 依赖旁边的 `Claude-to-IM` 仓库。
+> 如果你是从 GitHub 源码安装，不要只克隆这个仓库。
+> 正确做法是先把两个仓库并排克隆，再先构建 `Claude-to-IM`，最后安装并构建 `Claude-to-IM-skill`。
+>
+> 推荐目录结构：
+>
+> ```text
+> ~/code/
+>   Claude-to-IM/
+>   Claude-to-IM-skill/
+> ```
+>
+> 推荐执行顺序：
+>
+> ```bash
+> mkdir -p ~/code
+> cd ~/code
+> git clone https://github.com/op7418/Claude-to-IM.git
+> git clone https://github.com/op7418/Claude-to-IM-skill.git
+>
+> cd ~/code/Claude-to-IM
+> npm install
+> npm run build
+>
+> cd ~/code/Claude-to-IM-skill
+> npm install
+> npm run build
+> ```
+
 ### Claude Code
 
 #### 推荐：`npx skills`
@@ -78,20 +109,49 @@ ln -s ~/code/Claude-to-IM-skill ~/.claude/skills/claude-to-im
 
 ### Codex
 
-#### 推荐：使用 Codex 安装脚本
+#### 推荐：先克隆两个仓库，先构建 core，再把 skill 链接进 Codex
 
 ```bash
-git clone https://github.com/op7418/Claude-to-IM-skill.git ~/code/Claude-to-IM-skill
-bash ~/code/Claude-to-IM-skill/scripts/install-codex.sh
+mkdir -p ~/code
+cd ~/code
+git clone https://github.com/op7418/Claude-to-IM.git
+git clone https://github.com/op7418/Claude-to-IM-skill.git
+
+cd ~/code/Claude-to-IM
+npm install
+npm run build
+
+cd ~/code/Claude-to-IM-skill
+npm install
+npm run build
+bash scripts/install-codex.sh --link
 ```
 
-如果你想保留可开发的本地仓库：
+这是目前对人和 AI 都最稳的 README 路径：
+
+- `Claude-to-IM-skill` 安装时能正确找到 `../Claude-to-IM`
+- core 会先完成构建
+- Codex 里使用的是 `~/.codex/skills/claude-to-im` 的 live link
+
+#### 备选：使用 Codex 安装脚本的复制模式
+
+如果你更想用复制安装而不是符号链接，也要先把两个仓库都克隆并构建好：
 
 ```bash
-bash ~/code/Claude-to-IM-skill/scripts/install-codex.sh --link
-```
+mkdir -p ~/code
+cd ~/code
+git clone https://github.com/op7418/Claude-to-IM.git
+git clone https://github.com/op7418/Claude-to-IM-skill.git
 
-安装脚本会把 Skill 放到 `~/.codex/skills/claude-to-im`，并自动安装依赖、构建 daemon。
+cd ~/code/Claude-to-IM
+npm install
+npm run build
+
+cd ~/code/Claude-to-IM-skill
+npm install
+npm run build
+bash scripts/install-codex.sh
+```
 
 安装完成后，直接对 Codex 说：
 
@@ -108,11 +168,20 @@ claude-to-im setup
 #### 备选：直接克隆到 Codex skills 目录
 
 ```bash
+mkdir -p ~/.codex/skills
+git clone https://github.com/op7418/Claude-to-IM.git ~/.codex/skills/Claude-to-IM
 git clone https://github.com/op7418/Claude-to-IM-skill.git ~/.codex/skills/claude-to-im
+
+cd ~/.codex/skills/Claude-to-IM
+npm install
+npm run build
+
 cd ~/.codex/skills/claude-to-im
 npm install
 npm run build
 ```
+
+这种直接克隆方式只有在 `~/.codex/skills` 下同时存在 `Claude-to-IM/` 和 `claude-to-im/` 两个并排目录时才有效。
 
 ### 验证安装
 
@@ -153,6 +222,16 @@ npm run build
 如果你是用 `install-codex.sh` 的复制模式安装的：
 
 ```bash
+cd ~/code/Claude-to-IM
+git pull
+npm install
+npm run build
+
+cd ~/code/Claude-to-IM-skill
+git pull
+npm install
+npm run build
+
 rm -rf ~/.codex/skills/claude-to-im
 bash ~/code/Claude-to-IM-skill/scripts/install-codex.sh
 ```
@@ -160,6 +239,11 @@ bash ~/code/Claude-to-IM-skill/scripts/install-codex.sh
 如果你是用 `--link` 模式，或者直接克隆到 Codex skills 目录：
 
 ```bash
+cd ~/.codex/skills/Claude-to-IM 2>/dev/null || cd ~/code/Claude-to-IM
+git pull
+npm install
+npm run build
+
 cd ~/.codex/skills/claude-to-im
 git pull
 npm install
