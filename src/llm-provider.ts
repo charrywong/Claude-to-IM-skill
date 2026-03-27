@@ -14,6 +14,39 @@ import type { PendingPermissions } from './permission-gateway.js';
 
 import { sseEvent } from './sse-utils.js';
 
+const CTI_SEND_DIRECTIVE_PROMPT = [
+  'Internal bridge protocol for attachments:',
+  '- Only when the user clearly asks you to send, attach, upload, or give them a generated local file/image back in chat, emit a self-closing tag in your final answer: <cti-send-file path="/absolute/path/to/file.ext" />',
+  '- Use an absolute local filesystem path that already exists.',
+  '- You may include normal user-facing text before or after the tag.',
+  '- If the user only wants the path, explanation, analysis, or file contents, do not emit the tag.',
+  '- Never emit the tag speculatively. Only use it for clear send-file intent.',
+].join('\n');
+
+const CTI_SCHEDULE_DIRECTIVE_PROMPT = [
+  'Internal bridge protocol for scheduled tasks:',
+  '- All user messages should be handled normally; do not rely on keyword matching.',
+  '- If the user is asking to create a scheduled task or reminder, include a <cti-schedule>...</cti-schedule> block in your final answer.',
+  '- The content inside <cti-schedule> must be strict JSON.',
+  '- The JSON must include: title, description, instruction, schedule.',
+  '- schedule.mode must be either "once" or "daily".',
+  '- For schedule.mode="once", include schedule.run_at as an ISO 8601 datetime with timezone.',
+  '- For schedule.mode="daily", include schedule.time as HH:MM in 24-hour format.',
+  '- Include timezone when it is known or can be inferred; otherwise use Asia/Shanghai.',
+  '- Put the normal user-facing confirmation in the regular answer text, outside the <cti-schedule> block.',
+  '- Do not emit <cti-schedule> for ordinary conversation or analysis.',
+].join('\n');
+
+function buildBridgeDirectivePrompt(userPrompt: string, systemPrompt?: string): string {
+  const parts = [
+    systemPrompt?.trim(),
+    CTI_SEND_DIRECTIVE_PROMPT,
+    CTI_SCHEDULE_DIRECTIVE_PROMPT,
+    userPrompt.trim(),
+  ].filter(Boolean);
+  return parts.join('\n\n');
+}
+
 // ── Environment isolation ──
 
 /** Env vars always passed through to the CLI subprocess. */
@@ -512,7 +545,7 @@ export class SDKLLMProvider implements LLMProvider {
               queryOptions.pathToClaudeCodeExecutable = cliPath;
             }
 
-            const prompt = buildPrompt(params.prompt, params.files);
+            const prompt = buildPrompt(buildBridgeDirectivePrompt(params.prompt, params.systemPrompt), params.files);
             const q = query({
               prompt: prompt as Parameters<typeof query>[0]['prompt'],
               options: queryOptions as Parameters<typeof query>[0]['options'],

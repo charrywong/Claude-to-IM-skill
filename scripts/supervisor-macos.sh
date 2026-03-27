@@ -88,13 +88,10 @@ generate_plist() {
     <string>${LOG_FILE}</string>
 
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 
     <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
+    <true/>
 
     <key>ThrottleInterval</key>
     <integer>10</integer>

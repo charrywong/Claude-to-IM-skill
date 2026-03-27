@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 
 import { initBridgeContext } from 'claude-to-im/src/lib/bridge/context.js';
 import * as bridgeManager from 'claude-to-im/src/lib/bridge/bridge-manager.js';
@@ -21,10 +22,12 @@ import { JsonFileStore } from './store.js';
 import { SDKLLMProvider, resolveClaudeCliPath, preflightCheck } from './llm-provider.js';
 import { PendingPermissions } from './permission-gateway.js';
 import { setupLogger } from './logger.js';
+import { SchedulerService } from './scheduler.js';
 
 const RUNTIME_DIR = path.join(CTI_HOME, 'runtime');
 const STATUS_FILE = path.join(RUNTIME_DIR, 'status.json');
 const PID_FILE = path.join(RUNTIME_DIR, 'bridge.pid');
+const RESTART_REQUEST_FILE = path.join(RUNTIME_DIR, 'restart-request.json');
 
 /**
  * Resolve the LLM provider based on the runtime setting.
@@ -115,6 +118,41 @@ function writeStatus(info: StatusInfo): void {
   fs.renameSync(tmp, STATUS_FILE);
 }
 
+interface RestartRequest {
+  requestedAt?: string;
+  requestedBy?: string;
+  delayMs?: number;
+}
+
+function readRestartRequest(): RestartRequest | null {
+  try {
+    return JSON.parse(fs.readFileSync(RESTART_REQUEST_FILE, 'utf-8')) as RestartRequest;
+  } catch {
+    return null;
+  }
+}
+
+function clearRestartRequest(): void {
+  try {
+    fs.unlinkSync(RESTART_REQUEST_FILE);
+  } catch {
+    // ignore missing request file
+  }
+}
+
+function scheduleRelaunchKickstart(delayMs: number): void {
+  if (process.platform !== 'darwin') return;
+  const uid = typeof process.getuid === 'function' ? process.getuid() : '';
+  const label = `gui/${uid}/com.claude-to-im.bridge`;
+  const delaySeconds = Math.max(1, Math.ceil(delayMs / 1000));
+  const command = `sleep ${delaySeconds}; launchctl kickstart -k '${label}'`;
+  const child = spawn('/bin/sh', ['-c', command], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
   setupLogger();
@@ -126,6 +164,7 @@ async function main(): Promise<void> {
   const store = new JsonFileStore(settings);
   const pendingPerms = new PendingPermissions();
   const llm = await resolveProvider(config, pendingPerms);
+  const scheduler = new SchedulerService();
   console.log(`[claude-to-im] Runtime: ${config.runtime}`);
 
   const gateway = {
@@ -137,8 +176,10 @@ async function main(): Promise<void> {
     store,
     llm,
     permissions: gateway,
+    scheduler,
     lifecycle: {
       onBridgeStart: () => {
+        scheduler.start();
         // Write authoritative PID from the actual process (not shell $!)
         fs.mkdirSync(RUNTIME_DIR, { recursive: true });
         fs.writeFileSync(PID_FILE, String(process.pid), 'utf-8');
@@ -152,6 +193,7 @@ async function main(): Promise<void> {
         console.log(`[claude-to-im] Bridge started (PID: ${process.pid}, channels: ${config.enabledChannels.join(', ')})`);
       },
       onBridgeStop: () => {
+        scheduler.stop();
         writeStatus({ running: false });
         console.log('[claude-to-im] Bridge stopped');
       },
@@ -162,20 +204,21 @@ async function main(): Promise<void> {
 
   // Graceful shutdown
   let shuttingDown = false;
-  const shutdown = async (signal?: string) => {
+  const shutdown = async (reason?: string, exitCode = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    const reason = signal ? `signal: ${signal}` : 'shutdown requested';
-    console.log(`[claude-to-im] Shutting down (${reason})...`);
+    const exitReason = reason || 'shutdown requested';
+    console.log(`[claude-to-im] Shutting down (${exitReason})...`);
     pendingPerms.denyAll();
     await bridgeManager.stop();
-    writeStatus({ running: false, lastExitReason: reason });
-    process.exit(0);
+    clearRestartRequest();
+    writeStatus({ running: false, lastExitReason: exitReason });
+    process.exit(exitCode);
   };
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGHUP', () => shutdown('SIGHUP'));
+  process.on('SIGTERM', () => shutdown('signal: SIGTERM'));
+  process.on('SIGINT', () => shutdown('signal: SIGINT'));
+  process.on('SIGHUP', () => shutdown('signal: SIGHUP'));
 
   // ── Exit diagnostics ──
   process.on('unhandledRejection', (reason) => {
@@ -194,10 +237,21 @@ async function main(): Promise<void> {
     console.log(`[claude-to-im] exit (code: ${code})`);
   });
 
-  // ── Heartbeat to keep event loop alive ──
-  // setInterval is ref'd by default, preventing Node from exiting
-  // when the event loop would otherwise be empty.
-  setInterval(() => { /* keepalive */ }, 45_000);
+  // Keep the event loop alive and honor deferred self-restart requests made
+  // from within the bridge process (for example, bot-triggered safe restarts).
+  setInterval(() => {
+    if (shuttingDown) return;
+    const request = readRestartRequest();
+    if (!request) return;
+
+    const requestedAtMs = request.requestedAt ? Date.parse(request.requestedAt) : Date.now();
+    const delayMs = Number.isFinite(request.delayMs) ? Number(request.delayMs) : 0;
+    if (Date.now() < requestedAtMs + delayMs) return;
+
+    const requestedBy = request.requestedBy || 'unknown';
+    scheduleRelaunchKickstart(3_000);
+    void shutdown(`restart requested by ${requestedBy}`, 75);
+  }, 2_000);
 }
 
 main().catch((err) => {

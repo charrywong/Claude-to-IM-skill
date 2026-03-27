@@ -36,6 +36,30 @@ const CTI_SEND_DIRECTIVE_PROMPT = [
   '- Never emit the tag speculatively. Only use it for clear send-file intent.',
 ].join('\n');
 
+const CTI_SCHEDULE_DIRECTIVE_PROMPT = [
+  'Internal bridge protocol for scheduled tasks:',
+  '- All user messages should be handled normally; do not rely on keyword matching.',
+  '- If the user is asking to create a scheduled task or reminder, include a <cti-schedule>...</cti-schedule> block in your final answer.',
+  '- The content inside <cti-schedule> must be strict JSON.',
+  '- The JSON must include: title, description, instruction, schedule.',
+  '- schedule.mode must be either "once" or "daily".',
+  '- For schedule.mode="once", include schedule.run_at as an ISO 8601 datetime with timezone.',
+  '- For schedule.mode="daily", include schedule.time as HH:MM in 24-hour format.',
+  '- Include timezone when it is known or can be inferred; otherwise use Asia/Shanghai.',
+  '- Put the normal user-facing confirmation in the regular answer text, outside the <cti-schedule> block.',
+  '- Do not emit <cti-schedule> for ordinary conversation or analysis.',
+].join('\n');
+
+function buildBridgeDirectivePrompt(userPrompt: string, systemPrompt?: string): string {
+  const parts = [
+    systemPrompt?.trim(),
+    CTI_SEND_DIRECTIVE_PROMPT,
+    CTI_SCHEDULE_DIRECTIVE_PROMPT,
+    userPrompt.trim(),
+  ].filter(Boolean);
+  return parts.join('\n\n');
+}
+
 // All SDK types kept as `any` because @openai/codex-sdk is optional.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type CodexModule = any;
@@ -175,10 +199,10 @@ export class CodexProvider implements LLMProvider {
               return `- attachment ${idx + 1}: ${file.name} (${file.type}, ${file.size} bytes) at ${localPath}`;
             });
 
-            const promptCore = fileContextLines.length > 0
-              ? `${params.prompt}\n\nAttached local files:\n${fileContextLines.join('\n')}\n\nYou can read these files directly from their local paths above.`
-              : params.prompt;
-            const promptWithFileContext = `${promptCore}\n\n${CTI_SEND_DIRECTIVE_PROMPT}`;
+            const basePrompt = buildBridgeDirectivePrompt(params.prompt, params.systemPrompt);
+            const promptWithFileContext = fileContextLines.length > 0
+              ? `${basePrompt}\n\nAttached local files:\n${fileContextLines.join('\n')}\n\nYou can read these files directly from their local paths above.`
+              : basePrompt;
 
             let input: string | Array<Record<string, string>>;
             if (imageFiles.length > 0) {
