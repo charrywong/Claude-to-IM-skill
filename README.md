@@ -40,6 +40,8 @@ Claude Code / Codex → reads/writes your codebase
 
 Choose the section that matches the AI agent product you actually use.
 
+If you want an AI-friendly source install checklist that covers **both repos**, local linking, config, build, and restart, see [install.md](install.md).
+
 > Important for source installs and AI agents
 >
 > `Claude-to-IM-skill` depends on the sibling repository `Claude-to-IM` via `file:../Claude-to-IM`.
@@ -316,6 +318,32 @@ All commands are run inside Claude Code or Codex:
 | `/claude-to-im logs 200` | "logs 200" | Show last 200 log lines |
 | `/claude-to-im reconfigure` | "reconfigure" / "修改配置" | Update config interactively |
 | `/claude-to-im doctor` | "doctor" / "诊断" | Diagnose issues |
+
+### IM Chat Commands
+
+Once the daemon is running and your bot is connected, these commands are available **inside the IM chat itself**:
+
+| Command | Description |
+|---|---|
+| `/new [path]` | Start a fresh bridge session, optionally bound to a specific working directory |
+| `/bind <session_id>` | Rebind the current chat to an existing session |
+| `/cwd /abs/path` | Change the working directory for this chat |
+| `/mode plan|code|ask` | Change the bridge mode for this chat |
+| `/status` | Show current bridge session, cwd, mode, and model status |
+| `/sessions` | List recent sessions for the current channel |
+| `/stop` | Abort the current running task in this chat |
+| `/restart` | Request a safe daemon restart after the current chat turn completes |
+| `/model` | Show current model status for this chat |
+| `/model list` | Show known/configured models |
+| `/model use <name>` | Switch this chat to a specific model override |
+| `/model default` | Clear the override and return to the runtime default model |
+| `/model help` | Show model subcommand help |
+| `/task in <2m\|30s\|1h> <instruction>` | Schedule a one-time future task |
+| `/task daily <HH:MM> <instruction>` | Schedule a recurring daily task |
+| `/task list` | Show scheduled tasks for this chat |
+| `/task remove <id>` | Remove a scheduled task |
+| `/perm allow\|allow_session\|deny <id>` | Resolve a pending permission request manually |
+| `1`, `2`, `3` | Quick permission replies on Feishu/QQ/WeChat when exactly one permission is pending |
 
 ## Platform Setup Guides
 
