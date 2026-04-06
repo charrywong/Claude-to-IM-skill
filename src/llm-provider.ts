@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { SDKMessage, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
-import type { LLMProvider, StreamChatParams, FileAttachment } from 'claude-to-im/src/lib/bridge/host.js';
+import type { FileAttachment, LLMProvider, ModelCatalog, StreamChatParams } from 'claude-to-im/src/lib/bridge/host.js';
 import type { PendingPermissions } from './permission-gateway.js';
 
 import { sseEvent } from './sse-utils.js';
@@ -459,6 +459,17 @@ export class SDKLLMProvider implements LLMProvider {
   constructor(private pendingPerms: PendingPermissions, cliPath?: string, autoApprove = false) {
     this.cliPath = cliPath;
     this.autoApprove = autoApprove;
+  }
+
+  async listModels(): Promise<ModelCatalog> {
+    const models = process.env.CTI_DEFAULT_MODEL
+      ? [{ id: process.env.CTI_DEFAULT_MODEL }]
+      : [];
+
+    return {
+      models,
+      note: 'Dynamic model listing is unavailable for the Claude CLI runtime in this bridge.',
+    };
   }
 
   streamChat(params: StreamChatParams): ReadableStream<string> {
