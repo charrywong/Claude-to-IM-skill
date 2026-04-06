@@ -102,6 +102,67 @@ function shouldRetryFreshThread(message: string): boolean {
   );
 }
 
+function getCodexConfigPath(): string {
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  return path.join(codexHome, 'config.toml');
+}
+
+function parseTomlStringValue(raw: string): string | null {
+  const match = raw.match(/^([A-Za-z0-9_-]+)\s*=\s*["']([^"']+)["']\s*$/);
+  return match ? match[2].trim() : null;
+}
+
+function parseProfileSectionName(section: string): string | null {
+  const quoted = section.match(/^profiles\."([^"]+)"$/);
+  if (quoted) return quoted[1];
+  const bare = section.match(/^profiles\.([A-Za-z0-9_.-]+)$/);
+  return bare ? bare[1] : null;
+}
+
+function readConfiguredCodexModels(): Array<{ id: string; label?: string }> {
+  const configPath = getCodexConfigPath();
+  if (!fs.existsSync(configPath)) return [];
+
+  const raw = fs.readFileSync(configPath, 'utf8');
+  const entries: Array<{ id: string; label?: string }> = [];
+  const seen = new Set<string>();
+  let currentSection = '';
+
+  const pushEntry = (id: string, label?: string) => {
+    const trimmed = id.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    entries.push(label ? { id: trimmed, label } : { id: trimmed });
+  };
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const sectionMatch = trimmed.match(/^\[(.+)\]$/);
+    if (sectionMatch) {
+      currentSection = sectionMatch[1].trim();
+      continue;
+    }
+
+    if (!trimmed.startsWith('model')) continue;
+    const value = parseTomlStringValue(trimmed);
+    if (!value) continue;
+
+    if (!currentSection) {
+      pushEntry(value, 'config default');
+      continue;
+    }
+
+    const profileName = parseProfileSectionName(currentSection);
+    if (profileName) {
+      pushEntry(value, `profile:${profileName}`);
+    }
+  }
+
+  return entries;
+}
+
 export class CodexProvider implements LLMProvider {
   private sdk: CodexModule | null = null;
   private codex: CodexInstance | null = null;
@@ -112,8 +173,16 @@ export class CodexProvider implements LLMProvider {
   constructor(private pendingPerms: PendingPermissions) {}
 
   async listModels(): Promise<ModelCatalog> {
+    const configuredModels = readConfiguredCodexModels();
+    if (configuredModels.length > 0) {
+      return {
+        models: configuredModels,
+        note: `Configured models loaded from ${getCodexConfigPath()}. Dynamic runtime listing is unavailable for the Codex runtime in this bridge.`,
+      };
+    }
+
     const models = process.env.CTI_DEFAULT_MODEL
-      ? [{ id: process.env.CTI_DEFAULT_MODEL }]
+      ? [{ id: process.env.CTI_DEFAULT_MODEL, label: 'bridge default' }]
       : [];
 
     return {

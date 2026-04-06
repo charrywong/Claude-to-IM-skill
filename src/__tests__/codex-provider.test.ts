@@ -1,5 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // ── SSE utils tests ─────────────────────────────────────────
 
@@ -47,6 +50,71 @@ function parseSSEChunks(chunks: string[]): Array<{ type: string; data: string }>
 }
 
 describe('CodexProvider', () => {
+  it('lists configured models from ~/.codex/config.toml', async () => {
+    const { CodexProvider } = await import('../codex-provider.js');
+    const { PendingPermissions } = await import('../permission-gateway.js');
+    const provider = new CodexProvider(new PendingPermissions());
+
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+    const oldCodeXHome = process.env.CODEX_HOME;
+    const oldDefaultModel = process.env.CTI_DEFAULT_MODEL;
+    process.env.CODEX_HOME = tmpHome;
+    delete process.env.CTI_DEFAULT_MODEL;
+
+    try {
+      fs.mkdirSync(tmpHome, { recursive: true });
+      fs.writeFileSync(path.join(tmpHome, 'config.toml'), [
+        'model = "gpt-5.4"',
+        '',
+        '[profiles.qwen]',
+        'model = "qwen3.6-plus"',
+        '',
+        '[profiles.fast]',
+        'model = "gpt-5-mini"',
+      ].join('\n'));
+
+      const catalog = await provider.listModels();
+      assert.deepEqual(catalog.models, [
+        { id: 'gpt-5.4', label: 'config default' },
+        { id: 'qwen3.6-plus', label: 'profile:qwen' },
+        { id: 'gpt-5-mini', label: 'profile:fast' },
+      ]);
+      assert.match(catalog.note ?? '', /Configured models loaded from/);
+    } finally {
+      if (oldCodeXHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = oldCodeXHome;
+      if (oldDefaultModel === undefined) delete process.env.CTI_DEFAULT_MODEL;
+      else process.env.CTI_DEFAULT_MODEL = oldDefaultModel;
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to CTI_DEFAULT_MODEL when no codex config exists', async () => {
+    const { CodexProvider } = await import('../codex-provider.js');
+    const { PendingPermissions } = await import('../permission-gateway.js');
+    const provider = new CodexProvider(new PendingPermissions());
+
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-empty-'));
+    const oldCodeXHome = process.env.CODEX_HOME;
+    const oldDefaultModel = process.env.CTI_DEFAULT_MODEL;
+    process.env.CODEX_HOME = tmpHome;
+    process.env.CTI_DEFAULT_MODEL = 'fallback-model';
+
+    try {
+      const catalog = await provider.listModels();
+      assert.deepEqual(catalog.models, [
+        { id: 'fallback-model', label: 'bridge default' },
+      ]);
+      assert.match(catalog.note ?? '', /Dynamic model listing is unavailable/);
+    } finally {
+      if (oldCodeXHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = oldCodeXHome;
+      if (oldDefaultModel === undefined) delete process.env.CTI_DEFAULT_MODEL;
+      else process.env.CTI_DEFAULT_MODEL = oldDefaultModel;
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
   it('emits error when SDK init fails', async () => {
     const { CodexProvider } = await import('../codex-provider.js');
     const { PendingPermissions } = await import('../permission-gateway.js');
@@ -471,8 +539,6 @@ describe('CodexProvider', () => {
 });
 
 // ── Image input building tests ──────────────────────────────
-
-import fs from 'node:fs';
 
 /** Helper: build a full FileAttachment object for tests. */
 function makeFile(type: string, data: string, name = 'test-file') {
