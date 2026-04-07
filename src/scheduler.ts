@@ -75,6 +75,7 @@ export class SchedulerService implements SchedulerGateway {
   }
 
   scheduleTaskAt(input: {
+    botInstanceId?: string;
     channelType: string;
     chatId: string;
     title: string;
@@ -90,6 +91,7 @@ export class SchedulerService implements SchedulerGateway {
 
     const task: ScheduledTask = {
       id: crypto.randomUUID().slice(0, 8),
+      ...(input.botInstanceId ? { botInstanceId: input.botInstanceId } : {}),
       channelType: input.channelType,
       chatId: input.chatId,
       kind: 'agent_once',
@@ -108,6 +110,7 @@ export class SchedulerService implements SchedulerGateway {
   }
 
   scheduleTaskIn(input: {
+    botInstanceId?: string;
     channelType: string;
     chatId: string;
     title?: string;
@@ -119,6 +122,7 @@ export class SchedulerService implements SchedulerGateway {
     const description = input.description?.trim() || input.instruction.trim() || 'Scheduled task';
     const task: ScheduledTask = {
       id: crypto.randomUUID().slice(0, 8),
+      ...(input.botInstanceId ? { botInstanceId: input.botInstanceId } : {}),
       channelType: input.channelType,
       chatId: input.chatId,
       kind: 'agent_once',
@@ -136,6 +140,7 @@ export class SchedulerService implements SchedulerGateway {
   }
 
   scheduleTaskDaily(input: {
+    botInstanceId?: string;
     channelType: string;
     chatId: string;
     title: string;
@@ -146,6 +151,7 @@ export class SchedulerService implements SchedulerGateway {
   }): ScheduledTask {
     const task: ScheduledTask = {
       id: crypto.randomUUID().slice(0, 8),
+      ...(input.botInstanceId ? { botInstanceId: input.botInstanceId } : {}),
       channelType: input.channelType,
       chatId: input.chatId,
       kind: 'agent_daily',
@@ -164,13 +170,22 @@ export class SchedulerService implements SchedulerGateway {
     return task;
   }
 
-  listTasks(channelType: string, chatId: string): ScheduledTask[] {
-    return this.tasks.filter((task) => task.channelType === channelType && task.chatId === chatId);
+  listTasks(channelType: string, chatId: string, botInstanceId?: string): ScheduledTask[] {
+    return this.tasks.filter((task) =>
+      task.channelType === channelType &&
+      task.chatId === chatId &&
+      (!botInstanceId || !task.botInstanceId || task.botInstanceId === botInstanceId),
+    );
   }
 
-  removeTask(id: string, channelType: string, chatId: string): boolean {
+  removeTask(id: string, channelType: string, chatId: string, botInstanceId?: string): boolean {
     const before = this.tasks.length;
-    this.tasks = this.tasks.filter((task) => !(task.id === id && task.channelType === channelType && task.chatId === chatId));
+    this.tasks = this.tasks.filter((task) => !(
+      task.id === id &&
+      task.channelType === channelType &&
+      task.chatId === chatId &&
+      (!botInstanceId || !task.botInstanceId || task.botInstanceId === botInstanceId)
+    ));
     if (this.tasks.length === before) return false;
     writeTasks(this.tasks);
     return true;
@@ -208,7 +223,7 @@ export class SchedulerService implements SchedulerGateway {
 
   private async runTask(task: ScheduledTask): Promise<void> {
     const { store } = getBridgeContext();
-    const binding = store.getChannelBinding(task.channelType, task.chatId);
+    const binding = store.getChannelBinding(task.channelType, task.chatId, task.botInstanceId);
     const instruction = String(task.payload.instruction || '').trim();
 
     if (!binding) {
@@ -225,6 +240,7 @@ export class SchedulerService implements SchedulerGateway {
 
     const sendResult = await sendProactiveMessage({
       channelType: task.channelType,
+      ...(task.botInstanceId ? { botInstanceId: task.botInstanceId } : {}),
       chatId: task.chatId,
       userId: task.chatId,
     }, responseText, 'plain');

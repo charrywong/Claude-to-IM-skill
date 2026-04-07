@@ -7,6 +7,7 @@ import type {
 } from 'claude-to-im/src/lib/bridge/types.js';
 import { BaseChannelAdapter, registerAdapterFactory } from 'claude-to-im/src/lib/bridge/channel-adapter.js';
 import { getBridgeContext } from 'claude-to-im/src/lib/bridge/context.js';
+import type { BotInstance } from 'claude-to-im/src/lib/bridge/host.js';
 import {
   getWeixinAccount,
   getWeixinContextToken,
@@ -36,6 +37,7 @@ const BACKOFF_MAX_MS = 30_000;
 
 export class WeixinAdapter extends BaseChannelAdapter {
   readonly channelType: ChannelType = 'weixin';
+  readonly botInstanceId: string;
 
   private _running = false;
   private queue: InboundMessage[] = [];
@@ -51,6 +53,11 @@ export class WeixinAdapter extends BaseChannelAdapter {
     sealed: boolean;
   }>();
   private nextBatchId = 1;
+
+  constructor(bot?: BotInstance) {
+    super();
+    this.botInstanceId = bot?.id || 'weixin_default';
+  }
 
   async start(): Promise<void> {
     if (this._running) return;
@@ -344,6 +351,7 @@ export class WeixinAdapter extends BaseChannelAdapter {
       messageId: message.message_id || `weixin_${accountId}_${message.seq || Date.now()}`,
       address: {
         channelType: 'weixin',
+        botInstanceId: this.botInstanceId,
         chatId,
         userId: message.from_user_id,
         displayName: message.from_user_id.slice(0, 12),
@@ -474,4 +482,4 @@ function stripFormatting(text: string, parseMode?: 'HTML' | 'Markdown' | 'plain'
   return text;
 }
 
-registerAdapterFactory('weixin', () => new WeixinAdapter());
+registerAdapterFactory('weixin', (bot) => new WeixinAdapter(bot));

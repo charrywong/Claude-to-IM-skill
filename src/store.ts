@@ -13,6 +13,7 @@ import type {
   BridgeSession,
   BridgeMessage,
   BridgeApiProvider,
+  BotInstance,
   AuditLogInput,
   PermissionLinkInput,
   PermissionLinkRecord,
@@ -21,6 +22,7 @@ import type {
 } from 'claude-to-im/src/lib/bridge/host.js';
 import type { ChannelBinding, ChannelType } from 'claude-to-im/src/lib/bridge/types.js';
 import { CTI_HOME } from './config.js';
+import { loadBotsConfig, saveBotsConfig } from './bot-config.js';
 
 const DATA_DIR = path.join(CTI_HOME, 'data');
 const MESSAGES_DIR = path.join(DATA_DIR, 'messages');
@@ -58,6 +60,14 @@ function now(): string {
   return new Date().toISOString();
 }
 
+function getDefaultBotInstanceId(channelType: string): string {
+  return `${channelType}_default`;
+}
+
+function getBindingKey(channelType: string, chatId: string, botInstanceId?: string): string {
+  return `${channelType}:${botInstanceId || getDefaultBotInstanceId(channelType)}:${chatId}`;
+}
+
 // ── Lock entry ──
 
 interface LockEntry {
@@ -70,6 +80,7 @@ interface LockEntry {
 
 export class JsonFileStore implements BridgeStore {
   private settings: Map<string, string>;
+  private bots = new Map<string, BotInstance>();
   private sessions = new Map<string, BridgeSession>();
   private bindings = new Map<string, ChannelBinding>();
   private messages = new Map<string, BridgeMessage[]>();
@@ -79,8 +90,11 @@ export class JsonFileStore implements BridgeStore {
   private locks = new Map<string, LockEntry>();
   private auditLog: Array<AuditLogInput & { id: string; createdAt: string }> = [];
 
-  constructor(settingsMap: Map<string, string>) {
+  constructor(settingsMap: Map<string, string>, bots = loadBotsConfig().bots) {
     this.settings = settingsMap;
+    for (const bot of bots) {
+      this.bots.set(bot.id, bot);
+    }
     ensureDir(DATA_DIR);
     ensureDir(MESSAGES_DIR);
     this.loadAll();
@@ -103,8 +117,15 @@ export class JsonFileStore implements BridgeStore {
       path.join(DATA_DIR, 'bindings.json'),
       {},
     );
-    for (const [key, b] of Object.entries(bindings)) {
-      this.bindings.set(key, b);
+    for (const [, b] of Object.entries(bindings)) {
+      const normalized = {
+        ...b,
+        botInstanceId: b.botInstanceId || getDefaultBotInstanceId(b.channelType),
+      };
+      this.bindings.set(
+        getBindingKey(normalized.channelType, normalized.chatId, normalized.botInstanceId),
+        normalized,
+      );
     }
 
     // Permission links
@@ -202,20 +223,23 @@ export class JsonFileStore implements BridgeStore {
 
   // ── Channel Bindings ──
 
-  getChannelBinding(channelType: string, chatId: string): ChannelBinding | null {
-    return this.bindings.get(`${channelType}:${chatId}`) ?? null;
+  getChannelBinding(channelType: string, chatId: string, botInstanceId?: string): ChannelBinding | null {
+    return this.bindings.get(getBindingKey(channelType, chatId, botInstanceId)) ?? null;
   }
 
   upsertChannelBinding(data: UpsertChannelBindingInput): ChannelBinding {
-    const key = `${data.channelType}:${data.chatId}`;
+    const botInstanceId = data.botInstanceId || getDefaultBotInstanceId(data.channelType);
+    const key = getBindingKey(data.channelType, data.chatId, botInstanceId);
     const existing = this.bindings.get(key);
     if (existing) {
       const updated: ChannelBinding = {
         ...existing,
+        botInstanceId,
         codepilotSessionId: data.codepilotSessionId,
         sdkSessionId: data.sdkSessionId ?? '',
         workingDirectory: data.workingDirectory,
         model: data.model,
+        mode: (data.mode as 'code' | 'plan' | 'ask') ?? existing.mode,
         updatedAt: now(),
       };
       this.bindings.set(key, updated);
@@ -224,13 +248,14 @@ export class JsonFileStore implements BridgeStore {
     }
     const binding: ChannelBinding = {
       id: uuid(),
+      botInstanceId,
       channelType: data.channelType,
       chatId: data.chatId,
       codepilotSessionId: data.codepilotSessionId,
       sdkSessionId: '',
       workingDirectory: data.workingDirectory,
       model: data.model,
-      mode: (this.settings.get('bridge_default_mode') as 'code' | 'plan' | 'ask') || 'code',
+      mode: (data.mode as 'code' | 'plan' | 'ask') || (this.settings.get('bridge_default_mode') as 'code' | 'plan' | 'ask') || 'code',
       active: true,
       createdAt: now(),
       updatedAt: now(),
@@ -250,10 +275,13 @@ export class JsonFileStore implements BridgeStore {
     }
   }
 
-  listChannelBindings(channelType?: ChannelType): ChannelBinding[] {
+  listChannelBindings(channelType?: ChannelType, botInstanceId?: string): ChannelBinding[] {
     const all = Array.from(this.bindings.values());
-    if (!channelType) return all;
-    return all.filter((b) => b.channelType === channelType);
+    return all.filter((binding) => {
+      if (channelType && binding.channelType !== channelType) return false;
+      if (botInstanceId && binding.botInstanceId !== botInstanceId) return false;
+      return true;
+    });
   }
 
   // ── Sessions ──
@@ -268,9 +296,11 @@ export class JsonFileStore implements BridgeStore {
     systemPrompt?: string,
     cwd?: string,
     _mode?: string,
+    botInstanceId?: string,
   ): BridgeSession {
     const session: BridgeSession = {
       id: uuid(),
+      ...(botInstanceId ? { botInstanceId } : {}),
       working_directory: cwd || this.settings.get('bridge_default_work_dir') || process.cwd(),
       model,
       system_prompt: systemPrompt,
@@ -378,6 +408,29 @@ export class JsonFileStore implements BridgeStore {
     return null;
   }
 
+  getBotInstance(id: string): BotInstance | null {
+    return this.bots.get(id) ?? null;
+  }
+
+  listBotInstances(channelType?: ChannelType): BotInstance[] {
+    const bots = Array.from(this.bots.values());
+    if (!channelType) return bots;
+    return bots.filter((bot) => bot.channelType === channelType);
+  }
+
+  addBotInstance(bot: BotInstance): BotInstance {
+    this.bots.set(bot.id, bot);
+    saveBotsConfig({ version: 1, bots: Array.from(this.bots.values()) });
+    return bot;
+  }
+
+  deleteBotInstance(id: string): boolean {
+    const deleted = this.bots.delete(id);
+    if (!deleted) return false;
+    saveBotsConfig({ version: 1, bots: Array.from(this.bots.values()) });
+    return true;
+  }
+
   // ── Audit & Dedup ──
 
   insertAuditLog(entry: AuditLogInput): void {
@@ -429,6 +482,7 @@ export class JsonFileStore implements BridgeStore {
 
   insertPermissionLink(link: PermissionLinkInput): void {
     const record: PermissionLinkRecord = {
+      ...(link.botInstanceId ? { botInstanceId: link.botInstanceId } : {}),
       permissionRequestId: link.permissionRequestId,
       chatId: link.chatId,
       messageId: link.messageId,
@@ -439,22 +493,30 @@ export class JsonFileStore implements BridgeStore {
     this.persistPermissions();
   }
 
-  getPermissionLink(permissionRequestId: string): PermissionLinkRecord | null {
-    return this.permissionLinks.get(permissionRequestId) ?? null;
+  getPermissionLink(permissionRequestId: string, botInstanceId?: string): PermissionLinkRecord | null {
+    const record = this.permissionLinks.get(permissionRequestId) ?? null;
+    if (!record) return null;
+    if (botInstanceId && record.botInstanceId && record.botInstanceId !== botInstanceId) return null;
+    return record;
   }
 
-  markPermissionLinkResolved(permissionRequestId: string): boolean {
+  markPermissionLinkResolved(permissionRequestId: string, botInstanceId?: string): boolean {
     const link = this.permissionLinks.get(permissionRequestId);
     if (!link || link.resolved) return false;
+    if (botInstanceId && link.botInstanceId && link.botInstanceId !== botInstanceId) return false;
     link.resolved = true;
     this.persistPermissions();
     return true;
   }
 
-  listPendingPermissionLinksByChat(chatId: string): PermissionLinkRecord[] {
+  listPendingPermissionLinksByChat(chatId: string, botInstanceId?: string): PermissionLinkRecord[] {
     const result: PermissionLinkRecord[] = [];
     for (const link of this.permissionLinks.values()) {
-      if (link.chatId === chatId && !link.resolved) {
+      if (
+        link.chatId === chatId &&
+        !link.resolved &&
+        (!botInstanceId || !link.botInstanceId || link.botInstanceId === botInstanceId)
+      ) {
         result.push(link);
       }
     }

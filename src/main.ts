@@ -18,6 +18,7 @@ import './adapters/weixin-adapter.js';
 import type { LLMProvider } from 'claude-to-im/src/lib/bridge/host.js';
 import { loadConfig, configToSettings, CTI_HOME } from './config.js';
 import type { Config } from './config.js';
+import { loadBotsConfig } from './bot-config.js';
 import { JsonFileStore } from './store.js';
 import { SDKLLMProvider, resolveClaudeCliPath, preflightCheck } from './llm-provider.js';
 import { PendingPermissions } from './permission-gateway.js';
@@ -104,6 +105,7 @@ interface StatusInfo {
   runId?: string;
   startedAt?: string;
   channels?: string[];
+  bots?: string[];
   lastExitReason?: string;
 }
 
@@ -160,8 +162,9 @@ async function main(): Promise<void> {
   const runId = crypto.randomUUID();
   console.log(`[claude-to-im] Starting bridge (run_id: ${runId})`);
 
+  const botsConfig = loadBotsConfig(config);
   const settings = configToSettings(config);
-  const store = new JsonFileStore(settings);
+  const store = new JsonFileStore(settings, botsConfig.bots);
   const pendingPerms = new PendingPermissions();
   const llm = await resolveProvider(config, pendingPerms);
   const scheduler = new SchedulerService();
@@ -189,8 +192,9 @@ async function main(): Promise<void> {
           runId,
           startedAt: new Date().toISOString(),
           channels: config.enabledChannels,
+          bots: botsConfig.bots.map((bot) => bot.id),
         });
-        console.log(`[claude-to-im] Bridge started (PID: ${process.pid}, channels: ${config.enabledChannels.join(', ')})`);
+        console.log(`[claude-to-im] Bridge started (PID: ${process.pid}, bots: ${botsConfig.bots.map((bot) => bot.id).join(', ')})`);
       },
       onBridgeStop: () => {
         scheduler.stop();
