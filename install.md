@@ -20,7 +20,7 @@ End state:
 Canonical layout:
 
 ```text
-~/github/
+~/im-bot/
   Claude-to-IM/
   Claude-to-IM-skill/
 ```
@@ -38,8 +38,8 @@ Do not clone only the skill repository when doing a source install.
 ## 1. Clone Both Repositories
 
 ```bash
-mkdir -p ~/github
-cd ~/github
+mkdir -p ~/im-bot
+cd ~/im-bot
 
 git clone https://github.com/charrywong/Claude-to-IM.git
 git clone https://github.com/charrywong/Claude-to-IM-skill.git
@@ -48,7 +48,7 @@ git clone https://github.com/charrywong/Claude-to-IM-skill.git
 ## 2. Build the Core Repository First
 
 ```bash
-cd ~/github/Claude-to-IM
+cd ~/im-bot/Claude-to-IM
 npm install
 npm run build
 ```
@@ -56,7 +56,7 @@ npm run build
 ## 3. Build the Skill Repository Second
 
 ```bash
-cd ~/github/Claude-to-IM-skill
+cd ~/im-bot/Claude-to-IM-skill
 npm install
 npm run build
 ```
@@ -66,7 +66,7 @@ npm run build
 Recommended for local development:
 
 ```bash
-cd ~/github/Claude-to-IM-skill
+cd ~/im-bot/Claude-to-IM-skill
 bash scripts/install-codex.sh --link
 ```
 
@@ -120,13 +120,13 @@ Alternative API-key-based mode is also possible, but local login is preferred wh
 ## 7. Start the Daemon
 
 ```bash
-bash ~/github/Claude-to-IM-skill/scripts/daemon.sh start
+bash ~/im-bot/Claude-to-IM-skill/scripts/daemon.sh start
 ```
 
 ## 8. Check Status
 
 ```bash
-bash ~/github/Claude-to-IM-skill/scripts/daemon.sh status
+bash ~/im-bot/Claude-to-IM-skill/scripts/daemon.sh status
 ```
 
 Useful runtime files:
@@ -143,7 +143,7 @@ Useful runtime files:
 Use:
 
 ```bash
-bash ~/github/Claude-to-IM-skill/scripts/daemon-restart-safe.sh
+bash ~/im-bot/Claude-to-IM-skill/scripts/daemon-restart-safe.sh
 ```
 
 Behavior:
@@ -156,28 +156,28 @@ Behavior:
 If code changes in either repository:
 
 ```bash
-cd ~/github/Claude-to-IM
+cd ~/im-bot/Claude-to-IM
 npm run build
 
-cd ~/github/Claude-to-IM-skill
+cd ~/im-bot/Claude-to-IM-skill
 npm run build
 ```
 
 Then restart the daemon:
 
 ```bash
-bash ~/github/Claude-to-IM-skill/scripts/daemon-restart-safe.sh
+bash ~/im-bot/Claude-to-IM-skill/scripts/daemon-restart-safe.sh
 ```
 
 ## 11. Update from GitHub
 
 ```bash
-cd ~/github/Claude-to-IM
+cd ~/im-bot/Claude-to-IM
 git pull
 npm install
 npm run build
 
-cd ~/github/Claude-to-IM-skill
+cd ~/im-bot/Claude-to-IM-skill
 git pull
 npm install
 npm run build
@@ -186,15 +186,15 @@ npm run build
 Then restart:
 
 ```bash
-bash ~/github/Claude-to-IM-skill/scripts/daemon-restart-safe.sh
+bash ~/im-bot/Claude-to-IM-skill/scripts/daemon-restart-safe.sh
 ```
 
 ## 12. Validation Checklist
 
 An installation is considered valid when all of the following are true:
 
-- `~/github/Claude-to-IM` exists
-- `~/github/Claude-to-IM-skill` exists
+- `~/im-bot/Claude-to-IM` exists
+- `~/im-bot/Claude-to-IM-skill` exists
 - both `npm run build` commands succeed
 - `~/.claude-to-im/config.env` exists
 - `daemon.sh status` reports running after start
