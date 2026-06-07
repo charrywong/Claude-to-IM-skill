@@ -35,7 +35,7 @@ build_env_dict() {
 
   case "$runtime" in
     codex|auto)
-      for var in OPENAI_API_KEY CODEX_API_KEY CTI_CODEX_API_KEY CTI_CODEX_BASE_URL; do
+      for var in OPENAI_API_KEY CODEX_API_KEY CTI_CODEX_API_KEY CTI_CODEX_BASE_URL CODEX_HOME; do
         local val="${!var:-}"
         [ -z "$val" ] && continue
         dict+="${indent}<key>${var}</key>\n${indent}<string>${val}</string>\n"

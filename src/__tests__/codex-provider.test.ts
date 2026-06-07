@@ -585,7 +585,9 @@ describe('CodexProvider image input', () => {
     const parts = capturedInput as Array<Record<string, string>>;
     assert.equal(parts.length, 2);
     assert.equal(parts[0].type, 'text');
-    assert.equal(parts[0].text, 'Describe this image');
+    assert.ok(parts[0].text.includes('Internal bridge protocol for attachments:'));
+    assert.ok(parts[0].text.includes('Internal bridge protocol for scheduled tasks:'));
+    assert.ok(parts[0].text.endsWith('Describe this image'));
     assert.equal(parts[1].type, 'local_image');
     assert.ok(parts[1].path.endsWith('.png'), 'Temp file should have .png extension');
   });
@@ -621,7 +623,9 @@ describe('CodexProvider image input', () => {
     await collectStream(stream);
 
     assert.equal(typeof capturedInput, 'string', 'Input should be a plain string without images');
-    assert.equal(capturedInput, 'Hello');
+    assert.ok((capturedInput as string).includes('Internal bridge protocol for attachments:'));
+    assert.ok((capturedInput as string).includes('Internal bridge protocol for scheduled tasks:'));
+    assert.ok((capturedInput as string).endsWith('Hello'));
   });
 
   it('builds local_image input with multiple images, ignoring non-image files', async () => {
