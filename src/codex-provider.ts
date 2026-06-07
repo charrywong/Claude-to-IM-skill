@@ -102,6 +102,75 @@ function shouldRetryFreshThread(message: string): boolean {
   );
 }
 
+function normalizeInlineStatus(text: string, maxLength = 80): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function buildCodexItemStatusMessage(item: Record<string, unknown>): string | null {
+  switch (item.type) {
+    case 'reasoning': {
+      const text = typeof item.text === 'string' ? item.text.trim() : '';
+      return text || '正在分析请求。';
+    }
+
+    case 'command_execution': {
+      const command = typeof item.command === 'string' ? normalizeInlineStatus(item.command, 96) : '';
+      return command ? `正在执行命令: ${command}` : '正在执行命令。';
+    }
+
+    case 'mcp_tool_call': {
+      const server = typeof item.server === 'string' ? item.server.trim() : '';
+      const tool = typeof item.tool === 'string' ? item.tool.trim() : '';
+      if (server && tool) return `正在调用工具: mcp__${server}__${tool}`;
+      if (tool) return `正在调用工具: ${tool}`;
+      return '正在调用工具。';
+    }
+
+    case 'web_search': {
+      const query = typeof item.query === 'string' ? normalizeInlineStatus(item.query, 72) : '';
+      return query ? `正在搜索: ${query}` : '正在搜索信息。';
+    }
+
+    case 'todo_list': {
+      const items = Array.isArray(item.items) ? item.items : [];
+      const completed = items.filter((entry) => typeof entry === 'object' && entry !== null && (entry as { completed?: boolean }).completed).length;
+      const current = items.find((entry) => (
+        typeof entry === 'object' &&
+        entry !== null &&
+        !(entry as { completed?: boolean }).completed &&
+        typeof (entry as { text?: unknown }).text === 'string' &&
+        (entry as { text: string }).text.trim()
+      )) as { text: string } | undefined;
+      if (current) {
+        return `计划已更新: ${completed}/${items.length} 已完成，当前: ${normalizeInlineStatus(current.text, 72)}`;
+      }
+      if (items.length > 0) {
+        return `计划已更新: ${completed}/${items.length} 已完成`;
+      }
+      return '正在更新计划。';
+    }
+
+    case 'file_change': {
+      const changes = Array.isArray(item.changes) ? item.changes : [];
+      const firstPath = changes.find((change) => typeof change === 'object' && change !== null && typeof (change as { path?: unknown }).path === 'string') as { path: string } | undefined;
+      if (firstPath?.path) {
+        return `正在整理代码修改: ${normalizeInlineStatus(firstPath.path, 64)}`;
+      }
+      return '正在整理代码修改。';
+    }
+
+    case 'error': {
+      const message = typeof item.message === 'string' ? item.message.trim() : '';
+      return message || '处理中出现错误。';
+    }
+
+    default:
+      return null;
+  }
+}
+
 function getCodexConfigPath(): string {
   const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
   return path.join(codexHome, 'config.toml');
@@ -337,7 +406,24 @@ export class CodexProvider implements LLMProvider {
 
                       controller.enqueue(sseEvent('status', {
                         session_id: threadId,
+                        message: '任务已接收，正在启动 Codex。',
                       }));
+                      break;
+                    }
+
+                    case 'turn.started':
+                      controller.enqueue(sseEvent('status', {
+                        message: '已连接到 Codex，正在分析请求。',
+                      }));
+                      break;
+
+                    case 'item.started':
+                    case 'item.updated': {
+                      const item = event.item as Record<string, unknown>;
+                      const statusMessage = buildCodexItemStatusMessage(item);
+                      if (statusMessage) {
+                        controller.enqueue(sseEvent('status', { message: statusMessage }));
+                      }
                       break;
                     }
 
@@ -374,7 +460,6 @@ export class CodexProvider implements LLMProvider {
                       break;
                     }
 
-                    // item.started, item.updated, turn.started — no action needed
                   }
                 }
                 break;

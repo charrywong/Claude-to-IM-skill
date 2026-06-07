@@ -217,6 +217,29 @@ describe('CodexProvider', () => {
     assert.equal(toolResult.is_error, true);
   });
 
+  it('maps reasoning item to status SSE event', async () => {
+    const { CodexProvider } = await import('../codex-provider.js');
+    const { PendingPermissions } = await import('../permission-gateway.js');
+    const provider = new CodexProvider(new PendingPermissions());
+
+    const chunks: string[] = [];
+    const mockController = {
+      enqueue: (chunk: string) => chunks.push(chunk),
+    } as unknown as ReadableStreamDefaultController<string>;
+
+    (provider as any).handleCompletedItem(mockController, {
+      type: 'reasoning',
+      id: 'reason-1',
+      text: '正在检查仓库状态。',
+    });
+
+    const events = parseSSEChunks(chunks);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, 'status');
+    const statusData = JSON.parse(events[0].data);
+    assert.equal(statusData.reasoning, '正在检查仓库状态。');
+  });
+
   it('maps file_change item correctly', async () => {
     const { CodexProvider } = await import('../codex-provider.js');
     const { PendingPermissions } = await import('../permission-gateway.js');
@@ -292,6 +315,52 @@ describe('CodexProvider', () => {
     const events = parseSSEChunks(chunks);
     const toolResult = JSON.parse(events[1].data);
     assert.equal(toolResult.content, JSON.stringify({ items: [1, 2, 3] }));
+  });
+
+  it('emits visible status updates before answer text arrives', async () => {
+    const { CodexProvider } = await import('../codex-provider.js');
+    const { PendingPermissions } = await import('../permission-gateway.js');
+    const provider = new CodexProvider(new PendingPermissions());
+
+    const mockThread = {
+      runStreamed: () => ({
+        events: (async function* () {
+          yield { type: 'thread.started', thread_id: 'thread-1' };
+          yield { type: 'turn.started' };
+          yield {
+            type: 'item.started',
+            item: {
+              type: 'command_execution',
+              id: 'cmd-1',
+              command: 'npm run build',
+              aggregated_output: '',
+              status: 'in_progress',
+            },
+          };
+          yield { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 2, cached_input_tokens: 0 } };
+        })(),
+      }),
+    };
+
+    (provider as any).sdk = { Codex: class { constructor() {} } };
+    (provider as any).codex = {
+      startThread: () => mockThread,
+    };
+
+    const stream = provider.streamChat({
+      prompt: 'build the project',
+      sessionId: 'status-session',
+    });
+
+    const events = parseSSEChunks(await collectStream(stream));
+    const statusEvents = events
+      .filter((event) => event.type === 'status')
+      .map((event) => JSON.parse(event.data));
+
+    assert.equal(statusEvents[0].session_id, 'thread-1');
+    assert.equal(statusEvents[0].message, '任务已接收，正在启动 Codex。');
+    assert.equal(statusEvents[1].message, '已连接到 Codex，正在分析请求。');
+    assert.equal(statusEvents[2].message, '正在执行命令: npm run build');
   });
 
   it('skips empty agent_message', async () => {
